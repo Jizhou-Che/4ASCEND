@@ -4,8 +4,6 @@ import Data.Set (fromList, toList)
 import System.IO
 import System.Random
 
-----------------------------------------------------------------
-
 -- CONSTANTS.
 
 ascend :: Int
@@ -26,8 +24,6 @@ breadth = 9
 depth :: Int
 depth = 4
 
-----------------------------------------------------------------
-
 -- TYPE DECLARATIONS.
 
 type Board = [[Piece]]
@@ -43,14 +39,10 @@ data Move = PushO | PushX | PushA | Push'
 data Tree a = Node a [Tree a]
               deriving Show
 
-----------------------------------------------------------------
-
 -- BOARD PRESETS.
 
 blank :: Board
 blank = replicate rows $ replicate cols B
-
-----------------------------------------------------------------
 
 -- CORE UTILITIES.
 
@@ -120,24 +112,18 @@ win (b, hO, hX) | hO <= 0 = "X wins!"
                 | hX <= 0 = "O wins!"
                 | full b = if hO > hX then "O wins!" else if hX > hO then "X wins!" else if countO > countX then "O wins!" else if countO < countX then "X wins!" else "Draw!"
                 | otherwise = ""
-                  where countO = count b [O, O']
-                        countX = count b [X, X']
+                  where (countO, countX) = (count b [O, O'], count b [X, X'])
 
 initiateAscend :: Board -> [Position] -> Board
 initiateAscend b [] = b
 initiateAscend b (p : ps) = initiateAscend ((\(Just b) -> b) (move b PushA p)) ps
 
-clearAscend :: Board -> Board
-clearAscend b = map (\row -> [clearAscendPiece p | p <- row]) b
-                where clearAscendPiece p | elem p [AO, AO', AX, AX'] = B
-                                         | otherwise = p
-
 settleAscend :: (Board, Int, Int) -> (Board, Int, Int)
-settleAscend (b, hO, hX) | dO > dX = (clearAscend b, hO, hX - dO + dX)
-                         | dO < dX = (clearAscend b, hO + dO - dX, hX)
-                         | otherwise = (clearAscend b, hO, hX)
-                           where dO = count b [AO] + 2 * count b [AO']
-                                 dX = count b [AX] + 2 * count b [AX']
+settleAscend (b, hO, hX) | dO > dX = (b', hO, hX - if dO - dX > countAO then countAO + (dO - dX - countAO + 1) `div` 2 else dO - dX)
+                         | otherwise = (b', hO - if dX - dO > countAX then countAX + (dX - dO - countAX + 1) `div` 2 else dX - dO, hX)
+                           where b' = map (map (\p -> if elem p [AO, AO', AX, AX'] then B else p)) b
+                                 (dO, dX) = (countAO + 2 * countAO', countAX + 2 * countAX')
+                                 (countAO, countAO', countAX, countAX') = (count b [AO], count b [AO'], count b [AX], count b [AX'])
 
 rowPiece :: Board -> Position -> [(Piece, Position)]
 rowPiece b (r, _) = [(b !! r !! c, (r, c)) | c <- [0 .. cols - 1]]
@@ -152,12 +138,9 @@ diag2Piece :: Board -> Position -> [(Piece, Position)]
 diag2Piece b (r, c) = [(b !! r' !! c', (r', c')) | (r', c') <- zip [max 0 (r + c - cols + 1) .. min (rows - 1) (r + c)] (reverse [max 0 (c + r - rows + 1) .. min (cols - 1) (r + c)])]
 
 checkConnectRow :: [(Piece, Position)] -> (Piece, Position) -> [Position]
-checkConnectRow pps pp = ps1 ++ ps2
-                         where ps1 = map snd $ takeWhile (\(p, _) -> p == fst pp') (reverse pps1)
-                               ps2 = map snd $ takeWhile (\(p, _) -> p == fst pp') pps2
-                               (pps1, pps2) = splitAt (head (elemIndices pp' pps')) pps'
-                               pp' = (movePieceUnchecked (fst pp) Push', snd pp)
-                               pps' = [(movePieceUnchecked p Push', pos) | (p, pos) <- pps]
+checkConnectRow pps pp = map snd (takeWhile (\(p, _) -> p == fst pp') (reverse pps1)) ++ map snd (takeWhile (\(p, _) -> p == fst pp') pps2)
+                         where (pps1, pps2) = splitAt (head (elemIndices pp' pps')) pps'
+                               (pps', pp') = ([(movePieceUnchecked p Push', pos) | (p, pos) <- pps], (movePieceUnchecked (fst pp) Push', snd pp))
 
 checkConnect :: Board -> Position -> [Position]
 checkConnect b (r, c) = toList $ fromList $ concat $ [checkConnectRow row (b !! r !! c, (r, c)) | row <- [rowPiece b (r, c), colPiece b (r, c), diag1Piece b (r, c), diag2Piece b (r, c)]]
@@ -170,35 +153,64 @@ checkAscendRow pps pp | length ps < ascend = []
 checkAscend :: Board -> Position -> [Position]
 checkAscend b (r, c) = toList $ fromList $ concat $ [checkAscendRow row (b !! r !! c, (r, c)) | row <- [rowPiece b (r, c), colPiece b (r, c), diag1Piece b (r, c), diag2Piece b (r, c)]]
 
-checkStepAscend :: Board -> Position -> [(Int, Position)]
-checkStepAscend b (r, c) = filter (\(n, _) -> n /= 0) [(if elem (r, c) aps then length aps else 0, p) | (b', p) <- zip bs ps, aps <- [checkAscend b' p]]
+checkStepAscend :: Board -> Position -> [(Position, [Position])]
+checkStepAscend b (r, c) = [(p, aps) | (b', p) <- zip bs ps, aps <- [checkAscend b' p], elem (r, c) aps]
                            where bs = map (\(Just b) -> b) [move b (if elem (b !! r !! c) [O, O'] then PushO else PushX) p | p <- ps]
                                  ps = map snd $ filter (\(p, _) -> elem p [B, B', AO, AO', AX, AX']) $ rowPiece b (r, c) ++ colPiece b (r, c) ++ diag1Piece b (r, c) ++ diag2Piece b (r, c)
 
-heuristic :: Board -> Move -> [(Int, Position)]
-heuristic b m = reverse $ sort $ zip step8 [(r, c) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
-                where step8 = [if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then step7 !! (r * cols + c) else -1 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
-                      step7 = [step6 !! (r * cols + c) + max (rows `div` 2) (cols `div` 2) - max (abs (rows `div` 2 - r)) (abs (cols `div` 2 - c)) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
-                      step6 = [step5 !! (r * cols + c) + if elem (b !! r !! c) [AO, AO', AX, AX'] then 10 else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
-                      step5 = [step4 !! (r * cols + c) + if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] && checkAscend b' (r, c) == [] then sum [step4 !! (r' * cols + c') | (r', c') <- map snd (checkStepAscend b' (r, c))] else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1], b' <- [map (map (\p -> if elem p (if m == PushO then [X, X'] else [O, O']) then B else p)) ((\(Just b) -> b) (move b m (r, c)))]]
-                      step4 = [step3 !! (r * cols + c) + if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then length (checkConnect b' (r, c)) + length (checkAscend b' (r, c)) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1], b' <- [(\(Just b) -> b) (move b m (r, c))]]
-                      step3 = [step2 !! (r * cols + c) + if elem (b !! r !! c) (if m == PushO then [X, X'] else [O, O']) then length (checkConnect b (r, c)) + sum (map fst (checkStepAscend b (r, c))) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
-                      step2 = [step1 !! (r * cols + c) + if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then length (checkConnect b' (r, c)) + length (checkAscend b' (r, c)) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1], b' <- [(\(Just b) -> b) (move b (nextMove m) (r, c))]]
-                      step1 = [if elem (b !! r !! c) [B', O', X', AO', AX'] then 2 else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+checkOnlyAscend :: Board -> Move -> [Position]
+checkOnlyAscend b m = findOnly $ filter (\(_, ps) -> ps /= []) [let b' = (\(Just b) -> b) (move b m (r, c)) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then ((r, c), filter (\p -> p /= (r, c)) (checkAscend b' (r, c))) else ((r, c), []) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                      where findOnly [] = []
+                            findOnly (x : xs) = if elem (snd x) (map snd xs) then findOnly (filter (\(_, ps) -> ps /= snd x) xs) else (fst x) : findOnly xs
 
-expand :: ((Int, Position), (Board, Int, Int)) -> Move -> [((Int, Position), (Board, Int, Int))]
-expand (_, (b, hO, hX)) m | win (b, hO, hX) /= "" = []
-                          | ascending b = [((h, p), settleAscend (b', hO, hX)) | ((h, p), b') <- hpbs]
-                          | otherwise = [((h, p), (b', hO, hX)) | ((h, p), b') <- hpbs]
-                            where hpbs = map (\((h, p), Just b') -> ((h, p), initiateAscend b' (checkAscend b' p))) $ take breadth $ filter (\(_, mb) -> mb /= Nothing) [((h, p), move b m p) | (h, p) <- heuristic b m]
+importance :: Board -> [Position] -> Int
+importance _ [] = 0
+importance b ((r, c) : ps) | elem (b !! r !! c) [B', O', X', AO', AX'] = 2 + importance b ps
+                           | otherwise = 1 + importance b ps
 
-grow :: Tree ((Int, Position), (Board, Int, Int)) -> Move -> Tree ((Int, Position), (Board, Int, Int))
-grow (Node x []) m = Node x [Node x' [] | x' <- expand x m]
-grow (Node x ts) m = Node x [grow t m | t <- ts]
+density :: Board -> Move -> Int
+density b PushO = sum [importance b (checkConnect b (r, c)) | r <- [0 .. rows - 1], c <- [0 .. cols - 1], elem (b !! r !! c) [O, O']] + sum [let b' = (\(Just b) -> b) (move b PushO (r, c)) in (length (checkConnect b' (r, c)) - 1) `div` 2 | r <- [0 .. rows - 1], c <- [0 .. cols - 1], elem (b !! r !! c) [B, B', AO, AO', AX, AX']]
+density b PushX = sum [importance b (checkConnect b (r, c)) | r <- [0 .. rows - 1], c <- [0 .. cols - 1], elem (b !! r !! c) [X, X']] + sum [let b' = (\(Just b) -> b) (move b PushX (r, c)) in (length (checkConnect b' (r, c)) - 1) `div` 2 | r <- [0 .. rows - 1], c <- [0 .. cols - 1], elem (b !! r !! c) [B, B', AO, AO', AX, AX']]
 
-growN :: Tree ((Int, Position), (Board, Int, Int)) -> Move -> Int -> Tree ((Int, Position), (Board, Int, Int))
-growN t _ 0 = t
-growN t m n = growN (grow t m) (nextMove m) (n - 1)
+counterMove :: Board -> Move -> Board
+counterMove b m = initiateAscend b' (checkAscend b' p)
+                  where b' = (\(Just b) -> b) (move b m p)
+                        p = snd $ head $ reverse $ sort $ zip step2 [(r, c) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                        step2 = if all (== 0) step1 then [let b' = (\(Just b) -> b) (move b m (r, c)) in if elem (b !! r !! c) [AO, AO', AX, AX'] then importance b' (checkConnect b' (r, c)) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]] else step1
+                        step1 = [let b' = (\(Just b) -> b) (move b m (r, c)) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then importance b' (checkAscend b' (r, c)) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+
+healthBonus :: Move -> (Int, Int) -> (Int, Int) -> Int
+healthBonus m (hO, hX) (hO', hX') | hO' <= 0 = if m == PushO then -99 else 999
+                                  | hX' <= 0 = if m == PushO then 999 else -99
+                                  | otherwise = 20 * if m == PushO then hO' - hO else hX' - hX
+
+ascendBonus :: (Board, Int, Int) -> Move -> Bool -> [Int]
+ascendBonus (b, hO, hX) m f | ascending b = [let b' = (\(Just b) -> b) (move b m (r, c)); b'' = initiateAscend b' (checkAscend b' (r, c)); d1 = density b'' m; d2 = density b'' (nextMove m) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] && checkAscend b' (r, c) /= [] then 99 + d1 - d2 else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                            | otherwise = [let b' = (\(Just b) -> b) (move b m (r, c)); ps = checkAscend b' (r, c); (b'', hO', hX') = settleAscend (counterMove (initiateAscend b' ps) (nextMove m), hO, hX); d1 = density b'' m; d2 = density b'' (nextMove m) in if elem (b !! r !! c) [B, B'] && ps /= [] then (if f && d1 <= ascend then -99 else 4) + (if f then d1 - d2 else 0) + healthBonus m (hO, hX) (hO', hX') else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+
+heuristic :: (Board, Int, Int) -> Move -> Bool -> [(Int, Position)]
+heuristic (b, hO, hX) m f = reverse $ sort $ zip step9 [(r, c) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                            where step9 = [if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then step8 !! (r * cols + c) else -999 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step8 = [step7 !! (r * cols + c) + max (rows `div` 2) (cols `div` 2) - max (abs (rows `div` 2 - r)) (abs (cols `div` 2 - c)) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step7 = [step6 !! (r * cols + c) + let b' = (\(Just b) -> b) (move b m (r, c)); d1 = density b m; d2 = density b' m in if elem (b !! r !! c) [B', AO', AX'] then (if d2 - d1 - importance b' [(r, c)] > 0 then 6 else 2) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step6 = [step5 !! (r * cols + c) + if elem (b !! r !! c) [AO', AX'] then 4 else if elem (b !! r !! c) [AO, AX] then 2 else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step5 = map (\(x, y) -> x + y) $ zip step4 (ascendBonus (b, hO, hX) m f)
+                                  step4 = [step3 !! (r * cols + c) + let b' = (\(Just b) -> b) (move b m (r, c)) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then (\n -> if n > importance b' [(r, c)] then n + 2 else n) (importance b' (checkConnect b' (r, c)) + importance b' (checkAscend b' (r, c))) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step3 = [step2 !! (r * cols + c) + let b' = map (map (\p -> if elem p (if m == PushO then [X, X'] else [O, O']) then B else p)) ((\(Just b) -> b) (move b m (r, c))) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] && checkAscend b' (r, c) == [] then max (sum [step2 !! (r' * cols + c') | (r', c') <- map fst (checkStepAscend b' (r, c))] - 4) 0 else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step2 = [step1 !! (r * cols + c) + if elem (b !! r !! c) (if m == PushO then [X, X'] else [O, O']) then importance b (checkConnect b (r, c)) + sum (map (importance b) (map snd (checkStepAscend b (r, c)))) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+                                  step1 = let ps = checkOnlyAscend b (nextMove m) in [let b' = (\(Just b) -> b) (move b (nextMove m) (r, c)) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then importance b' (checkConnect b' (r, c)) + (if elem (r, c) ps then 2 else 1) * importance b' (checkAscend b' (r, c)) else 0 | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
+
+expand :: ((Int, Position), (Board, Int, Int)) -> Move -> Bool -> [((Int, Position), (Board, Int, Int))]
+expand (_, (b, hO, hX)) m f | win (b, hO, hX) /= "" = []
+                            | ascending b = [((h, p), settleAscend (b', hO, hX)) | ((h, p), b') <- hpbs]
+                            | otherwise = [((h, p), (b', hO, hX)) | ((h, p), b') <- hpbs]
+                              where hpbs = map (\((h, p), Just b') -> ((h, p), initiateAscend b' (checkAscend b' p))) $ take breadth $ filter (\(_, mb) -> mb /= Nothing) [((h, p), move b m p) | (h, p) <- heuristic (b, hO, hX) m f]
+
+grow :: Tree ((Int, Position), (Board, Int, Int)) -> Move -> Bool -> Int -> Tree ((Int, Position), (Board, Int, Int))
+grow t _ _ 0 = t
+grow t m f n = grow (grow1 t) (nextMove m) (not f) (n - 1)
+               where grow1 (Node x []) = Node x [Node x' [] | x' <- expand x m f]
+                     grow1 (Node x ts) = Node x [grow1 t | t <- ts]
 
 label :: Tree ((Int, Position), (Board, Int, Int)) -> Move -> Tree ((Int, Int, Position), (Board, Int, Int))
 label (Node ((h, p), (b, hO, hX)) []) _ = Node ((hO - hX, h, p), (b, hO, hX)) []
@@ -210,9 +222,7 @@ options :: (Board, Int, Int) -> Move -> [(Position, (Board, Int, Int))]
 options x m = map (\((h, p), x') -> (p, x')) $ filter (\((h, _), _) -> h == maximum (map (\((h, _), _) -> h) hpxs)) hpxs
               where hpxs = map (\((l, h, p), x') -> ((h, p), x')) $ filter (\((l, _, _), _) -> l == (if m == PushO then maximum else minimum) (map (\((l, _, _), _) -> l) lhpxs)) lhpxs
                     lhpxs = map (\(Node lhpx _) -> lhpx) $ (\(Node _ ts) -> ts) lt
-                    lt = label (growN (Node ((-1, (-1, -1)), x) []) m depth) m
-
-----------------------------------------------------------------
+                    lt = label (grow (Node ((-1, (-1, -1)), x) []) m True depth) m
 
 -- IO UTILITIES.
 
@@ -242,8 +252,6 @@ inputHealth = do
   hFlush stdout
   healthX <- getLine
   return (read healthO :: Int, read healthX :: Int)
-
-----------------------------------------------------------------
 
 -- GAME.
 
