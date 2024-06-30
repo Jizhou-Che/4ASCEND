@@ -1,8 +1,8 @@
 import Data.List (elemIndices, sort)
 import Data.Set (fromList, toList)
-
-import System.IO
-import System.Random
+import System.Console.Haskeline (InputT, runInputT, defaultSettings, getInputLine, outputStr, outputStrLn)
+import System.Random (randomRIO)
+import Text.Read (readMaybe)
 
 -- CONSTANTS.
 
@@ -125,17 +125,17 @@ settleAscend (b, hO, hX) | dO > dX = (b', hO, hX - if dO - dX > countAO then cou
                                  (dO, dX) = (countAO + 2 * countAO', countAX + 2 * countAX')
                                  (countAO, countAO', countAX, countAX') = (count b [AO], count b [AO'], count b [AX], count b [AX'])
 
-rowPiece :: Board -> Position -> [(Piece, Position)]
-rowPiece b (r, _) = [(b !! r !! c, (r, c)) | c <- [0 .. cols - 1]]
+rowAt :: Board -> Position -> [(Piece, Position)]
+rowAt b (r, _) = [(b !! r !! c, (r, c)) | c <- [0 .. cols - 1]]
 
-colPiece :: Board -> Position -> [(Piece, Position)]
-colPiece b (_, c) = [(b !! r !! c, (r, c)) | r <- [0 .. rows - 1]]
+colAt :: Board -> Position -> [(Piece, Position)]
+colAt b (_, c) = [(b !! r !! c, (r, c)) | r <- [0 .. rows - 1]]
 
-diag1Piece :: Board -> Position -> [(Piece, Position)]
-diag1Piece b (r, c) = [(b !! r' !! c', (r', c')) | (r', c') <- zip [max 0 (r - c) .. min (rows - 1) (r - c + cols - 1)] [max 0 (c - r) .. min (cols - 1) (c - r + rows - 1)]]
+diag1At :: Board -> Position -> [(Piece, Position)]
+diag1At b (r, c) = [(b !! r' !! c', (r', c')) | (r', c') <- zip [max 0 (r - c) .. min (rows - 1) (r - c + cols - 1)] [max 0 (c - r) .. min (cols - 1) (c - r + rows - 1)]]
 
-diag2Piece :: Board -> Position -> [(Piece, Position)]
-diag2Piece b (r, c) = [(b !! r' !! c', (r', c')) | (r', c') <- zip [max 0 (r + c - cols + 1) .. min (rows - 1) (r + c)] (reverse [max 0 (c + r - rows + 1) .. min (cols - 1) (r + c)])]
+diag2At :: Board -> Position -> [(Piece, Position)]
+diag2At b (r, c) = [(b !! r' !! c', (r', c')) | (r', c') <- zip [max 0 (r + c - cols + 1) .. min (rows - 1) (r + c)] (reverse [max 0 (c + r - rows + 1) .. min (cols - 1) (r + c)])]
 
 checkConnectRow :: [(Piece, Position)] -> (Piece, Position) -> [Position]
 checkConnectRow pps pp = map snd (takeWhile (\(p, _) -> p == fst pp') (reverse pps1)) ++ map snd (takeWhile (\(p, _) -> p == fst pp') pps2)
@@ -143,7 +143,7 @@ checkConnectRow pps pp = map snd (takeWhile (\(p, _) -> p == fst pp') (reverse p
                                (pps', pp') = ([(movePieceUnchecked p Push', pos) | (p, pos) <- pps], (movePieceUnchecked (fst pp) Push', snd pp))
 
 checkConnect :: Board -> Position -> [Position]
-checkConnect b (r, c) = toList $ fromList $ concat $ [checkConnectRow row (b !! r !! c, (r, c)) | row <- [rowPiece b (r, c), colPiece b (r, c), diag1Piece b (r, c), diag2Piece b (r, c)]]
+checkConnect b (r, c) = toList $ fromList $ concat $ [checkConnectRow row (b !! r !! c, (r, c)) | row <- [rowAt b (r, c), colAt b (r, c), diag1At b (r, c), diag2At b (r, c)]]
 
 checkAscendRow :: [(Piece, Position)] -> (Piece, Position) -> [Position]
 checkAscendRow pps pp | length ps < ascend = []
@@ -151,12 +151,12 @@ checkAscendRow pps pp | length ps < ascend = []
                         where ps = checkConnectRow pps pp
 
 checkAscend :: Board -> Position -> [Position]
-checkAscend b (r, c) = toList $ fromList $ concat $ [checkAscendRow row (b !! r !! c, (r, c)) | row <- [rowPiece b (r, c), colPiece b (r, c), diag1Piece b (r, c), diag2Piece b (r, c)]]
+checkAscend b (r, c) = toList $ fromList $ concat $ [checkAscendRow row (b !! r !! c, (r, c)) | row <- [rowAt b (r, c), colAt b (r, c), diag1At b (r, c), diag2At b (r, c)]]
 
 checkStepAscend :: Board -> Position -> [(Position, [Position])]
 checkStepAscend b (r, c) = [(p, aps) | (b', p) <- zip bs ps, aps <- [checkAscend b' p], elem (r, c) aps]
                            where bs = map (\(Just b) -> b) [move b (if elem (b !! r !! c) [O, O'] then PushO else PushX) p | p <- ps]
-                                 ps = map snd $ filter (\(p, _) -> elem p [B, B', AO, AO', AX, AX']) $ rowPiece b (r, c) ++ colPiece b (r, c) ++ diag1Piece b (r, c) ++ diag2Piece b (r, c)
+                                 ps = map snd $ filter (\(p, _) -> elem p [B, B', AO, AO', AX, AX']) $ rowAt b (r, c) ++ colAt b (r, c) ++ diag1At b (r, c) ++ diag2At b (r, c)
 
 checkOnlyAscend :: Board -> Move -> [Position]
 checkOnlyAscend b m = findOnly $ filter (\(_, ps) -> ps /= []) [let b' = (\(Just b) -> b) (move b m (r, c)) in if elem (b !! r !! c) [B, B', AO, AO', AX, AX'] then ((r, c), filter (\p -> p /= (r, c)) (checkAscend b' (r, c))) else ((r, c), []) | r <- [0 .. rows - 1], c <- [0 .. cols - 1]]
@@ -238,44 +238,56 @@ showPiece AO' = "☆'"
 showPiece AX = "★ "
 showPiece AX' = "★'"
 
-printBoard :: (Board, Int, Int) -> IO ()
+printBoard :: (Board, Int, Int) -> InputT IO ()
 printBoard (b, hO, hX) = do
-  putStr $ unlines $ map concat $ map (map showPiece) b
-  putStrLn $ "Health O: " ++ show hO ++ " | Health X: " ++ show hX
+  outputStr $ unlines $ map concat $ map (map showPiece) b
+  outputStrLn $ "Health O: " ++ show hO ++ " | Health X: " ++ show hX
 
-inputHealth :: IO (Int, Int)
-inputHealth = do
-  putStr "Health O > "
-  hFlush stdout
-  healthO <- getLine
-  putStr "Health X > "
-  hFlush stdout
-  healthX <- getLine
-  return (read healthO :: Int, read healthX :: Int)
+inputHealth :: String -> InputT IO (Int)
+inputHealth s = do
+  ms <- getInputLine s
+  if ms == Nothing then do
+    outputStrLn "Invalid health."
+    inputHealth s
+  else do
+    let mi = readMaybe ((\(Just s) -> s) ms) :: Maybe Int
+    if mi == Nothing then do
+      outputStrLn "Invalid health."
+      inputHealth s
+    else do
+      return $ (\(Just i) -> i) mi
 
 -- GAME.
 
 main :: IO ()
-main = do
-  putStr "Play as O or X? > "
-  hFlush stdout
-  c <- getLine
-  if c == "O" || c == "o" then do
-    (healthO, healthX) <- inputHealth
-    play (board, healthO, healthX) PushO True
-  else if c == "X" || c == "x" then do
-    (healthO, healthX) <- inputHealth
-    play (board, healthO, healthX) PushO False
-  else do
-    putStrLn "Invalid option."
-    main
+main = runInputT defaultSettings start
 
-play :: (Board, Int, Int) -> Move -> Bool -> IO ()
+start :: InputT IO ()
+start = do
+  ms <- getInputLine "Play as O or X? > "
+  if ms == Nothing then do
+    outputStrLn "Invalid option."
+    start
+  else do
+    let s = (\(Just s) -> s) ms
+    if s == "O" || s == "o" then do
+      healthO <- inputHealth "Health O > "
+      healthX <- inputHealth "Health X > "
+      play (board, healthO, healthX) PushO True
+    else if s == "X" || s == "x" then do
+      healthO <- inputHealth "Health O > "
+      healthX <- inputHealth "Health X > "
+      play (board, healthO, healthX) PushO False
+    else do
+      outputStrLn "Invalid option."
+      start
+
+play :: (Board, Int, Int) -> Move -> Bool -> InputT IO ()
 play (b, hO, hX) m isHuman = do
   printBoard (b, hO, hX)
   let s = win (b, hO, hX)
   if s /= "" then do
-    putStrLn s
+    outputStrLn s
   else do
     (b1, hO1, hX1) <- hmove (b, hO, hX) Push'
     printBoard (b1, hO1, hX1)
@@ -286,40 +298,56 @@ play (b, hO, hX) m isHuman = do
       (b2, hO2, hX2) <- cmove (b1, hO1, hX1) m
       play (b2, hO2, hX2) (nextMove m) (not isHuman)
 
-hmove :: (Board, Int, Int) -> Move -> IO (Board, Int, Int)
+hmove :: (Board, Int, Int) -> Move -> InputT IO (Board, Int, Int)
 hmove (b, hO, hX) Push' = do
-  putStr "Grass positions :: [(Int, Int)] > "
-  hFlush stdout
-  input <- getLine
-  let ps = map (\(x, y) -> (x - 1, y - 1)) $ read input :: [Position]
-  let mb1 = growGrass b ps
-  if mb1 == Nothing then do
-    putStrLn "Invalid potisions."
+  ms <- getInputLine "Grass positions :: [(Int, Int)] > "
+  if ms == Nothing then do
+    outputStrLn "Invalid potisions."
     hmove (b, hO, hX) Push'
   else do
-    return ((\(Just b) -> b) mb1, hO, hX)
+    let s = (\(Just s) -> s) ms
+    let mps = readMaybe s :: Maybe [Position]
+    if mps == Nothing then do
+      outputStrLn "Invalid potisions."
+      hmove (b, hO, hX) Push'
+    else do
+      let ps = map (\(x, y) -> (x - 1, y - 1)) $ (\(Just ps) -> ps) mps
+      let mb1 = growGrass b ps
+      if mb1 == Nothing then do
+        outputStrLn "Invalid potisions."
+        hmove (b, hO, hX) Push'
+      else do
+        return ((\(Just b) -> b) mb1, hO, hX)
 hmove (b, hO, hX) m = do
-  putStr $ show m !! 4 : " position :: (Int, Int) > "
-  hFlush stdout
-  input <- getLine
-  let p = (\(x, y) -> (x - 1, y - 1)) $ read input :: Position
-  let mb1 = move b m p
-  if mb1 == Nothing then do
-    putStrLn "Invalid potision."
+  ms <- getInputLine $ show m !! 4 : " position :: (Int, Int) > "
+  if ms == Nothing then do
+    outputStrLn "Invalid potision."
     hmove (b, hO, hX) m
   else do
-    let b1 = (\(Just b) -> b) mb1
-    let b2 = initiateAscend b1 (checkAscend b1 p)
-    if ascending b then do
-      return $ settleAscend (b2, hO, hX)
+    let s = (\(Just s) -> s) ms
+    let mp = readMaybe s :: Maybe Position
+    if mp == Nothing then do
+      outputStrLn "Invalid potision."
+      hmove (b, hO, hX) m
     else do
-      return (b2, hO, hX)
+      let p = (\(x, y) -> (x - 1, y - 1)) $ (\(Just p) -> p) mp
+      let mb1 = move b m p
+      if mb1 == Nothing then do
+        outputStrLn "Invalid potision."
+        hmove (b, hO, hX) m
+      else do
+        let b1 = (\(Just b) -> b) mb1
+        let b2 = initiateAscend b1 (checkAscend b1 p)
+        if ascending b then do
+          return $ settleAscend (b2, hO, hX)
+        else do
+          return (b2, hO, hX)
 
-cmove :: (Board, Int, Int) -> Move -> IO (Board, Int, Int)
+cmove :: (Board, Int, Int) -> Move -> InputT IO (Board, Int, Int)
 cmove (b, hO, hX) m = do
-  putStrLn $ show m !! 4 : " is thinking..."
+  outputStrLn $ show m !! 4 : " is thinking..."
   let opts = options (b, hO, hX) m
   i <- randomRIO (0, length opts - 1)
   let ((r, c), (b', hO', hX')) = opts !! i
-  putStrLn $ show m !! 4 : " moved to " ++ show (r + 1, c + 1) ++ "."
+  outputStrLn $ show m !! 4 : " moved to " ++ show (r + 1, c + 1) ++ "."
   return (b', hO', hX')
